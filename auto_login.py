@@ -9,7 +9,7 @@ import ddddocr
 # 1. 网站配置区域
 # ==========================================
 CONFIG = {
-    "target_url": "https://panel.freecloud.ltd/login",  
+    "target_url": "https://panel.freecloud.ltd/index.php?rp=/login",  
     "username_selector": "#emailInp",             
     "password_selector": "#emailPwdInp",          
     "captcha_img_selector": "#allow_login_email_captcha",          
