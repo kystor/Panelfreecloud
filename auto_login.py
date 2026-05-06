@@ -1,17 +1,20 @@
 import time
 import os
 import base64
-import re  # 🌟 新增：导入正则表达式模块，用于从字符串中提取数字
+import re  # 🌟 导入正则表达式模块，用于从字符串中提取数字
 from seleniumbase import SB
 import ddddocr
 
 # ==========================================
-# 1. 网站配置区域
+# 1. 网站配置区域 (🌟 已经根据你提供的新网页代码更新了账号密码的选择器)
 # ==========================================
 CONFIG = {
     "target_url": "https://panel.freecloud.ltd/index.php?rp=/login",  
-    "username_selector": "#emailInp",             
-    "password_selector": "#emailPwdInp",          
+    
+    # 🌟 修改点：将邮箱和密码输入框的定位器更新为网页上真实的 id
+    "username_selector": "#inputEmail",       # 对应 <input id="inputEmail">      
+    "password_selector": "#inputPassword",    # 对应 <input id="inputPassword">      
+    
     "captcha_img_selector": "#allow_login_email_captcha",          
     "captcha_input_selector": "#captcha_allow_login_email_captcha", 
     "login_btn_selector": 'button[type="submit"]',
@@ -28,9 +31,12 @@ CONFIG = {
     "checkout_btn": "button#checkout"                         
 }
 
+# 提前创建一个文件夹，用来专门存放截图，方便后续排错
 os.makedirs("screenshots", exist_ok=True)
 
+# 截图辅助函数：自动给图片加上账号名和步骤编号
 def take_screenshot(sb, step_name, username="system"):
+    # 替换掉邮箱里不适合作为文件名的特殊符号
     safe_name = username.replace("@", "_").replace(".", "_")
     filepath = f"screenshots/{safe_name}_{step_name}.png"
     try:
@@ -42,8 +48,8 @@ def take_screenshot(sb, step_name, username="system"):
 # ==========================================
 # 2. Cloudflare 绕过辅助函数 
 # ==========================================
-# (为了保持代码整洁，CF绕过部分保持原样)
 def is_cloudflare_interstitial(sb) -> bool:
+    """检测当前页面是否处于 Cloudflare 5秒盾拦截状态"""
     try:
         page_source = sb.get_page_source()
         title = sb.get_title().lower() if sb.get_title() else ""
@@ -61,10 +67,12 @@ def is_cloudflare_interstitial(sb) -> bool:
         return False
 
 def bypass_cloudflare_interstitial(sb, max_attempts=4) -> bool:
+    """尝试通过点击绕过 Cloudflare 拦截"""
     print("    🛡️ 检测到 CF 5秒盾，准备破除...")
     for attempt in range(max_attempts):
         print(f"      ▶ 尝试绕过 ({attempt+1}/{max_attempts})...")
         try:
+            # 模拟物理鼠标点击验证码框
             sb.uc_gui_click_captcha()
             time.sleep(6)
             if not is_cloudflare_interstitial(sb):
@@ -76,7 +84,9 @@ def bypass_cloudflare_interstitial(sb, max_attempts=4) -> bool:
     return False
 
 def handle_turnstile_verification(sb) -> bool:
+    """处理页面内嵌的 Cloudflare Turnstile 人机验证控件"""
     try:
+        # 清除可能遮挡点击的 Cookie 弹窗
         cookie_btn = 'button[data-cky-tag="accept-button"]'
         if sb.is_element_visible(cookie_btn):
             sb.click(cookie_btn)
@@ -84,6 +94,7 @@ def handle_turnstile_verification(sb) -> bool:
     except:
         pass
 
+    # 将验证码滚动到屏幕中央
     sb.execute_script('''
         try {
             var t = document.querySelector('.cf-turnstile') || 
@@ -104,6 +115,7 @@ def handle_turnstile_verification(sb) -> bool:
             break
         time.sleep(1)
 
+    # 如果没找到验证码，说明无感通过了
     if not has_turnstile:
         return True
 
@@ -115,6 +127,7 @@ def handle_turnstile_verification(sb) -> bool:
             pass
             
         for _ in range(10):
+            # 检查是否成功获得了放行 token
             if sb.is_element_present('input[name="cf-turnstile-response"]'):
                 token = sb.get_attribute('input[name="cf-turnstile-response"]', 'value')
                 if token and len(token) > 20:
@@ -124,6 +137,7 @@ def handle_turnstile_verification(sb) -> bool:
         if verified:
             break
 
+    # 等待网站自动计算验证码
     if not verified:
         for _ in range(30):
             if sb.is_element_present('input[name="cf-turnstile-response"]'):
@@ -145,6 +159,7 @@ def process_single_account(username, password):
     print(f"➡️ 开始处理账号: {username}")
     print(f"==========================================")
     
+    # 尝试读取系统的 HTTP 代理（如果有的话）
     env_proxy = os.environ.get("HTTP_PROXY")
     
     with SB(
@@ -174,11 +189,13 @@ def process_single_account(username, password):
 
         try:
             print(">>> 正在输入账号和密码...")
+            # 🌟 这里就会使用到我们刚刚修改过的 #inputEmail 和 #inputPassword 了！
             sb.type(CONFIG['username_selector'], username)
             sb.type(CONFIG['password_selector'], password)
             time.sleep(1)
             take_screenshot(sb, "03_账号密码已输入", username)
 
+            # 检查是否有图片验证码
             if sb.is_element_visible(CONFIG['captcha_img_selector']):
                 img_src = sb.get_attribute(CONFIG['captcha_img_selector'], "src")
                 if "base64," in img_src:
@@ -195,11 +212,12 @@ def process_single_account(username, password):
             sb.click(CONFIG['login_btn_selector'])
             time.sleep(5) 
             
+            # 第一步：验证是否成功登录
             if sb.is_element_visible(CONFIG['user_center_indicator']) or "clientarea.php" in sb.get_current_url():
                 print(">>> ✅ 登录成功，已进入用户中心面板！")
                 take_screenshot(sb, "05_登录成功_用户中心面板", username)
             else:
-                print(">>> ❌ 登录失败。")
+                print(">>> ❌ 登录失败。请检查账号密码或网站是否要求了其他验证。")
                 take_screenshot(sb, "Error_02_登录失败页面", username)
                 return 
 
@@ -217,24 +235,22 @@ def process_single_account(username, password):
                 print(">>> ✅ 已完成签到并刷新页面。")
                 take_screenshot(sb, "07_签到刷新后", username)
             
-            # 🌟 核心逻辑增加处：获取签到后最新的积分并提取纯数字
+            # 提取最新的纯数字积分
             latest_points_text = sb.get_text(CONFIG['points_selector'])
-            # 使用正则表达式匹配出带有小数点的数字部分（例如从 "1.00积分" 中提取出 "1.00"）
             match = re.search(r"([\d\.]+)", latest_points_text)
             
             if match:
-                # 将提取出的文字数字转换成带小数点的浮点数，方便对比大小
                 points_value = float(match.group(1)) 
             else:
                 points_value = 0.0
                 
             print(f">>> 📊 当前解析到的实际可用积分数值为: {points_value}")
 
-            # 第三步：判断积分是否达到续费要求
+            # 第三步：判断积分是否满足续费条件（>= 5.0分）
             if points_value >= 5.0:
                 print(">>> 🟢 积分已满 5 分，允许进行续费操作！")
                 
-                # 开始检查并续费产品
+                # 检查有没有可以续费的产品
                 if sb.is_element_visible(CONFIG['services_panel']):
                     take_screenshot(sb, "08_积分达标_准备续费", username)
                     
@@ -250,15 +266,17 @@ def process_single_account(username, password):
                     time.sleep(3) 
                     take_screenshot(sb, "11_点击添加到购物车后", username)
 
-                    # 进入购物车结账
+                    # 进入购物车结账页面
                     sb.open("https://panel.freecloud.ltd/cart.php?a=view")
                     sb.wait_for_element(CONFIG['checkout_btn'], timeout=10)
                     take_screenshot(sb, "12_进入购物车结算页面", username)
                     
+                    # 强制勾选隐藏的美化复选框
                     sb.execute_script('document.querySelector("input[data-tos-checkbox]").click();')
                     time.sleep(1)
                     take_screenshot(sb, "13_已勾选服务条款", username)
                     
+                    # 等待结账按钮变为可点击状态并点击
                     sb.wait_for_element_not_disabled(CONFIG['checkout_btn'], timeout=5)
                     sb.click(CONFIG['checkout_btn'])
                     
@@ -268,7 +286,7 @@ def process_single_account(username, password):
                 else:
                     print(">>> ⚠️ 当前账号积分达标，但没有需要续费的可用产品。")
             else:
-                # 如果积分不足5分，则提示并跳过后续操作
+                # 积分不够5分，友好提示并停止当前账号的后续操作
                 print(f">>> ⏸️ 积分不足 5 分 (差 {5.0 - points_value:.2f} 分)，直接跳过续费流程。")
                 take_screenshot(sb, "08_积分不足_跳过续费", username)
 
@@ -281,19 +299,23 @@ def process_single_account(username, password):
 # ==========================================
 def main():
     print("🚀 自动化任务启动...")
+    # 获取环境变量中的账号列表
     accounts_str = os.environ.get("acount")
     
     if not accounts_str:
         print("⚠️ 未获取到名为 'acount' 的环境变量，请检查配置！")
         return
 
+    # 将账号字符串用逗号分隔成列表
     account_list = accounts_str.split(',')
     for item in account_list:
         item = item.strip()
         if ':' in item:
+            # 以冒号分割账号和密码
             parts = item.split(':', 1) 
             username = parts[0].strip()
             password = parts[1].strip()
+            # 运行单账号处理逻辑
             process_single_account(username, password)
             
     print("\n🏁 所有账号的任务执行完成！")
