@@ -9,7 +9,8 @@ on:
 jobs:
   run-script:
     runs-on: ubuntu-latest # 使用最新的 Ubuntu Linux 系统作为后台服务器
-
+    timeout-minutes: 10
+    
     steps:
       - name: 获取代码仓库
         uses: actions/checkout@v3
@@ -20,28 +21,22 @@ jobs:
           python-version: '3.10'
 
       - name: 安装 Python 依赖包
+        # 把 pip 安装日志也藏起来放到 init_env.log 里
         run: |
-          pip install seleniumbase ddddocr PyAutoGUI
+          pip install seleniumbase ddddocr PyAutoGUI > init_env.log 2>&1
 
       - name: 🚀 智能解析节点并启动 Hysteria2
         env:
-          # 读取你在 GitHub Secrets 中配置的 PROXY 变量
           proxy: ${{ secrets.PROXY }}
         run: |
-          echo ">>> 正在下载 Hysteria2 内核..."
+          # 后台运行 Hysteria2 并将日志写入 hy2.log，这里不会产生乱糟糟的输出
           wget -q https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
           chmod +x hysteria-linux-amd64
           
-          echo ">>> 正在解析节点链接..."
-          # 提取完整链接中的密码、服务器地址和 SNI
           AUTH=$(echo "$proxy" | sed -n 's|.*://\([^@]*\)@.*|\1|p')
           SERVER=$(echo "$proxy" | sed -n 's|.*@\([^/?#]*\).*|\1|p')
           SNI=$(echo "$proxy" | grep -oP 'sni=\K[^&#]*')
           
-          echo ">>> 提取成功！Server: $SERVER | SNI: $SNI"
-          
-          echo ">>> 正在生成本地代理配置..."
-          # 将提取出来的信息，动态写入到 hy2-config.yaml 配置文件中
           cat <<EOF > hy2-config.yaml
           server: $SERVER
           auth: $AUTH
@@ -52,42 +47,35 @@ jobs:
             listen: 127.0.0.1:10808
           EOF
           
-          echo ">>> 启动 Hysteria2 后台服务..."
-          # 在后台静默运行 Hysteria2 代理客户端，并将日志输出到 hy2.log
           nohup ./hysteria-linux-amd64 client -c hy2-config.yaml > hy2.log 2>&1 &
-          
-          # 等待 3 秒，确保代理服务完全启动
           sleep 3
-          
-          # 打印一下启动日志，方便你在 GitHub Actions 面板查看是否连接成功
-          cat hy2.log
 
       - name: 运行自动化脚本 (全局接管网络 + 虚拟屏幕)
         env:
           acount: ${{ secrets.ACOUNT }}
           HTTP_PROXY: socks5://127.0.0.1:10808
           HTTPS_PROXY: socks5://127.0.0.1:10808
-          # 保证 GitHub 通信和本地通信不走代理
           NO_PROXY: localhost,127.0.0.1,::1,github.com,github.io,googlechromelabs.github.io,googleapis.com
         run: |
-          echo ">>> 🔍 正在测试本地代理是否成功连通外网..."
-          curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 10 || echo "⚠️ 警告：代理连接测试失败，节点可能已失效或被封锁！"
+          # 1. 代理测试：把大块的网络返回信息重定向到日志文件中
+          curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 10 >> init_env.log 2>&1 || echo "⚠️ 警告：代理连接测试失败！" >> init_env.log
           
-          # 🌟 安装 Xvfb 虚拟显示器，解决无头模式下无法模拟鼠标点击的问题
-          echo ">>> 📺 正在安装 Xvfb 虚拟显示环境..."
-          sudo apt-get update
-          sudo apt-get install -y xvfb
+          # 2. 安装环境：把 apt-get 长长的下载进度条全部静默，写进日志文件
+          sudo apt-get update >> init_env.log 2>&1
+          sudo apt-get install -y xvfb fonts-noto-cjk >> init_env.log 2>&1
           
+          # 3. 这里是你在控制台唯一能看到的起始文字
           echo ">>> 🚀 开始执行自动登录 Python 脚本..."
-          
-          # 🌟 使用 xvfb-run 创建一个 1920x1080 的虚拟屏幕来运行 Python 脚本
-          # -u 参数保证 Python 实时输出日志，不被缓存阻塞
           xvfb-run --server-args="-screen 0 1920x1080x24" python -u auto_login.py
 
-      - name: 上传运行过程截图
+      - name: 上传运行过程截图与日志文件
         uses: actions/upload-artifact@v4
-        if: always() # 无论成功还是报错，都强制执行这一步，方便排错
+        if: always() # 无论成功还是报错都执行
         with:
-          name: Auto-Login-Screenshots
-          path: screenshots/
-          retention-days: 7 # 截图文件保存 7 天
+          name: Auto-Login-Results
+          # 这里可以写多行，把文件夹和生成的日志文件一起打包下载
+          path: |
+            screenshots/
+            init_env.log
+            hy2.log
+          retention-days: 7
