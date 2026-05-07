@@ -3,7 +3,7 @@ name: 多账号自动登录续期任务
 on:
   schedule:
     # 每天 UTC 时间 00:00 运行（对应北京时间早上 8:00）
-    - cron: '0 0 * * *'
+    - cron: '0 16 * * *'
   workflow_dispatch: # 允许你在 GitHub 网页上手动点击按钮运行测试
 
 jobs:
