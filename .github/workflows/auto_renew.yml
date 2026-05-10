@@ -2,9 +2,9 @@ name: 多账号自动登录续期任务
 
 on:
   schedule:
-    # 每天 UTC 时间 00:00 运行（对应北京时间早上 8:00）
+    # 每天 UTC 时间 16:00 运行（严格对应北京时间 00:00）
     - cron: '0 16 * * *'
-  workflow_dispatch: # 允许你在 GitHub 网页上手动点击按钮运行测试
+  workflow_dispatch: # 允许在 GitHub 网页上手动点击按钮运行测试
 
 jobs:
   run-script:
@@ -21,7 +21,7 @@ jobs:
           python-version: '3.10'
 
       - name: 安装 Python 依赖包
-        # 把 pip 安装日志也藏起来放到 init_env.log 里
+        # 把 pip 安装日志藏起来放到 init_env.log 里，保持控制台整洁
         run: |
           pip install seleniumbase ddddocr PyAutoGUI > init_env.log 2>&1
 
@@ -29,7 +29,7 @@ jobs:
         env:
           proxy: ${{ secrets.PROXY }}
         run: |
-          # 后台运行 Hysteria2 并将日志写入 hy2.log，这里不会产生乱糟糟的输出
+          # 后台运行 Hysteria2 并将日志写入 hy2.log
           wget -q https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
           chmod +x hysteria-linux-amd64
           
@@ -64,7 +64,7 @@ jobs:
           sudo apt-get update >> init_env.log 2>&1
           sudo apt-get install -y xvfb fonts-noto-cjk >> init_env.log 2>&1
           
-          # 3. 这里是你在控制台唯一能看到的起始文字
+          # 3. 添加 -u 参数保证 Python 标准输出无缓冲，实时打印到 Actions 控制台
           echo ">>> 🚀 开始执行自动登录 Python 脚本..."
           xvfb-run --server-args="-screen 0 1920x1080x24" python -u auto_login.py
 
