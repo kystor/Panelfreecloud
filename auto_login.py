@@ -2,12 +2,12 @@ import time
 import os
 import base64
 import re  
-import datetime  # 🌟 导入日期与时间处理模块
+import datetime  # 导入日期与时间处理模块，用于计算上海时区时间
 from seleniumbase import SB
 import ddddocr
 
 # ==========================================
-# 1. 网站配置区域
+# 1. 网站配置区域 (核心元素的定位器)
 # ==========================================
 CONFIG = {
     "target_url": "https://panel.freecloud.ltd/index.php?rp=/login",  
@@ -153,7 +153,7 @@ def handle_turnstile_verification(sb) -> bool:
     return True
 
 # ==========================================
-# 3. 单个账号的处理流程
+# 3. 单个账号的处理流程核心代码
 # ==========================================
 def process_single_account(username, password):
     print(f"\n==========================================")
@@ -195,7 +195,7 @@ def process_single_account(username, password):
             time.sleep(1)
             take_screenshot(sb, "03_账号密码已输入", username)
 
-            # 检查是否有图片验证码
+            # 检查是否有图片验证码，如果有就用 ddddocr 识别
             if sb.is_element_visible(CONFIG['captcha_img_selector']):
                 img_src = sb.get_attribute(CONFIG['captcha_img_selector'], "src")
                 if "base64," in img_src:
@@ -221,19 +221,25 @@ def process_single_account(username, password):
                 take_screenshot(sb, "Error_02_登录失败页面", username)
                 return 
 
-            # 第二步：获取当前积分并签到
+            # 第二步：获取当前积分并检查签到状态
             if sb.is_element_visible(CONFIG['points_selector']):
                 current_points_text = sb.get_text(CONFIG['points_selector'])
-                print(f">>> 💰 签到前积分显示为：{current_points_text}")
-                take_screenshot(sb, "06_点击签到前", username)
+                print(f">>> 💰 当前积分显示为：{current_points_text}")
+                take_screenshot(sb, "06_积分与签到状态检查", username)
             
-            if sb.is_element_visible(CONFIG['checkin_btn']):
+            # 🌟 智能判断：如果网页提示已经签到，则跳过点击签到按钮的步骤
+            if sb.is_element_visible("p:contains('您今天已经签到过了！')"):
+                print(">>> 📌 【状态确认】系统提示今天已经签到过了，无需重复操作。")
+            elif sb.is_element_visible(CONFIG['checkin_btn']):
+                print(">>> 🖱️ 发现签到按钮，准备执行自动签到...")
                 sb.click(CONFIG['checkin_btn'])
                 time.sleep(3) 
                 sb.refresh_page() 
                 time.sleep(3)
-                print(">>> ✅ 已完成签到并刷新页面。")
+                print(">>> ✅ 已完成签到并刷新页面！")
                 take_screenshot(sb, "07_签到刷新后", username)
+            else:
+                print(">>> ⚠️ 未发现签到按钮，也没有已签到提示，请排查截图查看当前页面状态。")
             
             # 提取最新的纯数字积分
             latest_points_text = sb.get_text(CONFIG['points_selector'])
@@ -250,7 +256,7 @@ def process_single_account(username, password):
             if points_value >= 5.0:
                 print(">>> 🟢 积分已满 5 分，允许进行续费操作！")
                 
-                # 检查有没有可以续费的产品
+                # 检查有没有可以续费的产品面板
                 if sb.is_element_visible(CONFIG['services_panel']):
                     print(">>> 🔍 找到可用产品，准备进入续费页面...")
                     take_screenshot(sb, "08_积分达标_准备续费", username)
@@ -278,7 +284,7 @@ def process_single_account(username, password):
                         if date_match:
                             expire_date_str = date_match.group(1)
                             
-                            # 1. 把网页上的字符串格式化为 Python 认识的日期对象 (.date() 可以剥离时间，只保留年月日)
+                            # 1. 把网页上的字符串格式化为 Python 认识的日期对象 
                             expire_date_obj = datetime.datetime.strptime(expire_date_str.replace('-', '/'), "%Y/%m/%d").date()
                             
                             # 2. 构建上海时区 (UTC+8小时)
@@ -315,7 +321,7 @@ def process_single_account(username, password):
                     sb.open("https://panel.freecloud.ltd/cart.php?a=view")
                     time.sleep(3)
                     
-                    # 🌟 终极改进逻辑：利用你发现的专属 HTML 元素，精准判断购物车状态
+                    # 🌟 终极改进逻辑：利用专属 HTML 元素，精准判断购物车是否被拦截
                     if sb.is_element_visible("h6.message-title:contains('您的购物车是空的')") or sb.is_element_visible(".message-no-data"):
                         print(">>> ⏸️ 【拦截成功】检测到“您的购物车是空的”。系统已拒绝提前续费，自动跳过结账。")
                         take_screenshot(sb, "12_购物车为空_未到续费期", username)
@@ -325,7 +331,7 @@ def process_single_account(username, password):
                         take_screenshot(sb, "12_进入购物车结算页面_准备结账", username)
                         
                         print(">>> ☑️ 正在自动勾选【服务条款】...")
-                        # 强制勾选隐藏的美化复选框
+                        # 强制勾选隐藏的复选框
                         sb.execute_script('document.querySelector("input[data-tos-checkbox]").click();')
                         time.sleep(1)
                         take_screenshot(sb, "13_已勾选服务条款", username)
@@ -358,12 +364,14 @@ def process_single_account(username, password):
 # ==========================================
 def main():
     print("🚀 自动化任务启动...")
+    # 从 GitHub Secrets 环境变量中获取账号配置
     accounts_str = os.environ.get("acount")
     
     if not accounts_str:
         print("⚠️ 未获取到名为 'acount' 的环境变量，请检查配置！")
         return
 
+    # 支持多个账号循环执行
     account_list = accounts_str.split(',')
     for item in account_list:
         item = item.strip()
@@ -371,6 +379,7 @@ def main():
             parts = item.split(':', 1) 
             username = parts[0].strip()
             password = parts[1].strip()
+            # 执行核心逻辑
             process_single_account(username, password)
             
     print("\n🏁 所有账号的任务执行完成！")
