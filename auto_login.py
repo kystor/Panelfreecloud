@@ -1,19 +1,20 @@
 import time
 import os
 import base64
-import re  # 🌟 导入正则表达式模块，用于从字符串中提取数字
+import re  
+import datetime  # 🌟 导入日期与时间处理模块
 from seleniumbase import SB
 import ddddocr
 
 # ==========================================
-# 1. 网站配置区域 (已根据网页真实的 id 更新选择器)
+# 1. 网站配置区域
 # ==========================================
 CONFIG = {
     "target_url": "https://panel.freecloud.ltd/index.php?rp=/login",  
     
     # 邮箱和密码输入框的定位器
-    "username_selector": "#inputEmail",       # 对应 <input id="inputEmail">      
-    "password_selector": "#inputPassword",    # 对应 <input id="inputPassword">      
+    "username_selector": "#inputEmail",       
+    "password_selector": "#inputPassword",    
     
     "captcha_img_selector": "#allow_login_email_captcha",          
     "captcha_input_selector": "#captcha_allow_login_email_captcha", 
@@ -251,51 +252,100 @@ def process_single_account(username, password):
                 
                 # 检查有没有可以续费的产品
                 if sb.is_element_visible(CONFIG['services_panel']):
+                    print(">>> 🔍 找到可用产品，准备进入续费页面...")
                     take_screenshot(sb, "08_积分达标_准备续费", username)
                     
+                    print(">>> 🖱️ 正在点击上方导航栏的【产品服务】...")
                     sb.click(CONFIG['nav_services'])
                     time.sleep(1) 
                     take_screenshot(sb, "09_点击展开产品服务下拉菜单", username)
                     
+                    print(">>> 🖱️ 正在点击下拉菜单中的【续费服务】...")
                     sb.click(CONFIG['nav_renew'])
                     sb.wait_for_element(CONFIG['add_to_cart_btn'], timeout=10)
                     take_screenshot(sb, "10_进入续费服务列表页面", username)
                     
-                    # 无论当前状态如何，尝试点击添加到购物车
+                    # ===================================================================
+                    # 🌟 高级进阶：精准基于【上海时区】解析并计算到期时间
+                    # ===================================================================
+                    try:
+                        print(">>> 🔎 正在提取当前产品的到期时间信息...")
+                        renewal_text = sb.get_text(".domain-renewal-content")
+                        
+                        # 使用正则提取类似 "2026/07/04" 或者 "2026-07-04" 的日期
+                        date_match = re.search(r"下次逾期日期:\s*(\d{4}[/-]\d{2}[/-]\d{2})", renewal_text)
+                        
+                        if date_match:
+                            expire_date_str = date_match.group(1)
+                            
+                            # 1. 把网页上的字符串格式化为 Python 认识的日期对象 (.date() 可以剥离时间，只保留年月日)
+                            expire_date_obj = datetime.datetime.strptime(expire_date_str.replace('-', '/'), "%Y/%m/%d").date()
+                            
+                            # 2. 构建上海时区 (UTC+8小时)
+                            shanghai_tz = datetime.timezone(datetime.timedelta(hours=8))
+                            
+                            # 3. 获取带有上海时区的“今天”的日期对象
+                            today_shanghai_date = datetime.datetime.now(shanghai_tz).date()
+                            
+                            # 4. 精准相减得到天数
+                            days_left = (expire_date_obj - today_shanghai_date).days
+                            
+                            print(f">>> 📅 【服务状态】下次逾期日期为: {expire_date_str} (基于上海时间计算)")
+                            
+                            if days_left > 0:
+                                print(f">>> ⏳ 距离到期还有 {days_left} 天。")
+                                if days_left > 30:
+                                    print(">>> 💡 【系统预判】距离到期时间较长(>30天)，系统大概率会拦截提前续费。将继续尝试验证...")
+                                else:
+                                    print(">>> 🟢 【系统预判】产品已进入可续费周期，准备执行续费！")
+                            else:
+                                print(f">>> 🚨 【服务状态】服务已逾期 {abs(days_left)} 天，急需续费！")
+                        else:
+                            print(">>> ⚠️ 未能在页面上找到符合格式的逾期日期。")
+                    except Exception as e:
+                        print(f">>> ⚠️ 日期解析模块遇到小问题 (不影响后续流程): {e}")
+                    # ===================================================================
+
+                    print(">>> 🛒 正在尝试将产品【添加到购物车】...")
                     sb.click(CONFIG['add_to_cart_btn'])
                     time.sleep(3) 
                     take_screenshot(sb, "11_点击添加到购物车后", username)
 
-                    # 进入购物车结账页面
+                    print(">>> 🏃‍♂️ 正在前往购物车结算页面验证结果...")
                     sb.open("https://panel.freecloud.ltd/cart.php?a=view")
                     time.sleep(3)
                     
-                    # 🌟 核心改进逻辑：检查购物车内是否有结账按钮
-                    # 如果未到续费日期，购物车会为空，此时抓不到 checkout_btn
-                    if sb.is_element_visible(CONFIG['checkout_btn']):
+                    # 🌟 终极改进逻辑：利用你发现的专属 HTML 元素，精准判断购物车状态
+                    if sb.is_element_visible("h6.message-title:contains('您的购物车是空的')") or sb.is_element_visible(".message-no-data"):
+                        print(">>> ⏸️ 【拦截成功】检测到“您的购物车是空的”。系统已拒绝提前续费，自动跳过结账。")
+                        take_screenshot(sb, "12_购物车为空_未到续费期", username)
+                        
+                    elif sb.is_element_visible(CONFIG['checkout_btn']):
+                        print(">>> 📝 确认购物车内有商品，准备结账...")
                         take_screenshot(sb, "12_进入购物车结算页面_准备结账", username)
                         
+                        print(">>> ☑️ 正在自动勾选【服务条款】...")
                         # 强制勾选隐藏的美化复选框
                         sb.execute_script('document.querySelector("input[data-tos-checkbox]").click();')
                         time.sleep(1)
                         take_screenshot(sb, "13_已勾选服务条款", username)
                         
-                        # 🌟 修复点：使用官方推荐的 wait_for_element_clickable 等待按钮可被点击
+                        print(">>> 💳 正在点击最后的【结账】按钮...")
                         sb.wait_for_element_clickable(CONFIG['checkout_btn'], timeout=5)
                         sb.click(CONFIG['checkout_btn'])
                         
                         time.sleep(5)
                         take_screenshot(sb, "14_点击结账后的最终页面", username)
-                        print(">>> 🎉 续费及结账流程全部完成！")
+                        print(">>> 🎉 恭喜！续费及结账流程全部完成！")
+                        
                     else:
-                        # 拦截异常，如果商品未加入购物车，友好退出
-                        print(">>> ⏸️ 购物车为空。当前产品可能未到允许续费的时间周期，已自动跳过结账。")
-                        take_screenshot(sb, "12_购物车为空_未到续费期", username)
+                        # 兜底方案，防止网页出现其他未知错误
+                        print(">>> ⚠️ 购物车状态未知，未找到结账按钮也未发现空车提示，请查看截图排查。")
+                        take_screenshot(sb, "Error_12_购物车页面状态异常", username)
                         
                 else:
                     print(">>> ⚠️ 当前账号积分达标，但没有需要续费的可用产品。")
             else:
-                # 积分不够5分，友好提示并停止当前账号的后续操作
                 print(f">>> ⏸️ 积分不足 5 分 (差 {5.0 - points_value:.2f} 分)，直接跳过续费流程。")
                 take_screenshot(sb, "08_积分不足_跳过续费", username)
 
@@ -308,23 +358,19 @@ def process_single_account(username, password):
 # ==========================================
 def main():
     print("🚀 自动化任务启动...")
-    # 获取环境变量中的账号列表
     accounts_str = os.environ.get("acount")
     
     if not accounts_str:
         print("⚠️ 未获取到名为 'acount' 的环境变量，请检查配置！")
         return
 
-    # 将账号字符串用逗号分隔成列表
     account_list = accounts_str.split(',')
     for item in account_list:
         item = item.strip()
         if ':' in item:
-            # 以冒号分割账号和密码
             parts = item.split(':', 1) 
             username = parts[0].strip()
             password = parts[1].strip()
-            # 运行单账号处理逻辑
             process_single_account(username, password)
             
     print("\n🏁 所有账号的任务执行完成！")
