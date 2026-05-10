@@ -8,22 +8,23 @@ on:
 
 jobs:
   run-script:
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu Linux 系统作为后台服务器
+    # 🌟 核心修改：弃用充满不确定性的 ubuntu-latest，固定使用极其稳定的 22.04 LTS 版本
+    runs-on: ubuntu-22.04 
     timeout-minutes: 10
     
     steps:
       - name: 获取代码仓库
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 配置 Python 环境
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: 安装 Python 依赖包
-        # 把 pip 安装日志藏起来放到 init_env.log 里，保持控制台整洁
+        # 平时隐藏输出写入日志；一旦执行失败，自动打印日志内容到控制台并报错中断
         run: |
-          pip install seleniumbase ddddocr PyAutoGUI > init_env.log 2>&1
+          pip install seleniumbase ddddocr PyAutoGUI > init_env.log 2>&1 || { cat init_env.log; exit 1; }
 
       - name: 🚀 智能解析节点并启动 Hysteria2
         env:
@@ -57,14 +58,14 @@ jobs:
           HTTPS_PROXY: socks5://127.0.0.1:10808
           NO_PROXY: localhost,127.0.0.1,::1,github.com,github.io,googlechromelabs.github.io,googleapis.com
         run: |
-          # 1. 代理测试：把大块的网络返回信息重定向到日志文件中
+          # 1. 代理测试：把大块的网络返回信息重定向到日志文件中，失败则追加警告
           curl -x socks5://127.0.0.1:10808 -I https://www.google.com --connect-timeout 10 >> init_env.log 2>&1 || echo "⚠️ 警告：代理连接测试失败！" >> init_env.log
           
-          # 2. 安装环境：把 apt-get 长长的下载进度条全部静默，写进日志文件
-          sudo apt-get update >> init_env.log 2>&1
-          sudo apt-get install -y xvfb fonts-noto-cjk >> init_env.log 2>&1
+          # 2. 安装环境：把长长的下载进度条全部静默写入日志；一旦失败，打印日志并退出
+          sudo apt-get update >> init_env.log 2>&1 || { cat init_env.log; exit 1; }
+          sudo apt-get install -y xvfb fonts-noto-cjk >> init_env.log 2>&1 || { cat init_env.log; exit 1; }
           
-          # 3. 添加 -u 参数保证 Python 标准输出无缓冲，实时打印到 Actions 控制台
+          # 3. 添加 -u 参数保证 Python 标准输出无缓冲，实时打印到 Actions 控制台（不做限制）
           echo ">>> 🚀 开始执行自动登录 Python 脚本..."
           xvfb-run --server-args="-screen 0 1920x1080x24" python -u auto_login.py
 
@@ -73,7 +74,6 @@ jobs:
         if: always() # 无论成功还是报错都执行
         with:
           name: Auto-Login-Results
-          # 这里可以写多行，把文件夹和生成的日志文件一起打包下载
           path: |
             screenshots/
             init_env.log
