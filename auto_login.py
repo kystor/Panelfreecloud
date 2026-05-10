@@ -6,12 +6,12 @@ from seleniumbase import SB
 import ddddocr
 
 # ==========================================
-# 1. 网站配置区域 (🌟 已经根据你提供的新网页代码更新了账号密码的选择器)
+# 1. 网站配置区域 (已根据网页真实的 id 更新选择器)
 # ==========================================
 CONFIG = {
     "target_url": "https://panel.freecloud.ltd/index.php?rp=/login",  
     
-    # 🌟 修改点：将邮箱和密码输入框的定位器更新为网页上真实的 id
+    # 邮箱和密码输入框的定位器
     "username_selector": "#inputEmail",       # 对应 <input id="inputEmail">      
     "password_selector": "#inputPassword",    # 对应 <input id="inputPassword">      
     
@@ -23,12 +23,12 @@ CONFIG = {
     "points_selector": "p:contains('您的账户余额为：') strong",   
     "checkin_btn": "a[href*='action=dailycheckin']",          
     "services_panel": "#servicesPanel",                       
-    "nav_services": "#Primary_Navbar-Services > a",           
+    "nav_services": "#Primary_Navbar-Services > a",            
     "nav_renew": "#Primary_Navbar-Services-Renew_Services > a", 
     "add_to_cart_btn": "button.btn-add-renewal-to-cart",      
     "view_cart_btn": "a#Secondary_Sidebar-Actions-View_Cart", 
-    "tos_checkbox": "input[data-tos-checkbox]",               
-    "checkout_btn": "button#checkout"                         
+    "tos_checkbox": "input[data-tos-checkbox]",                
+    "checkout_btn": "button#checkout"                          
 }
 
 # 提前创建一个文件夹，用来专门存放截图，方便后续排错
@@ -189,7 +189,6 @@ def process_single_account(username, password):
 
         try:
             print(">>> 正在输入账号和密码...")
-            # 🌟 这里就会使用到我们刚刚修改过的 #inputEmail 和 #inputPassword 了！
             sb.type(CONFIG['username_selector'], username)
             sb.type(CONFIG['password_selector'], password)
             time.sleep(1)
@@ -262,27 +261,37 @@ def process_single_account(username, password):
                     sb.wait_for_element(CONFIG['add_to_cart_btn'], timeout=10)
                     take_screenshot(sb, "10_进入续费服务列表页面", username)
                     
+                    # 无论当前状态如何，尝试点击添加到购物车
                     sb.click(CONFIG['add_to_cart_btn'])
                     time.sleep(3) 
                     take_screenshot(sb, "11_点击添加到购物车后", username)
 
                     # 进入购物车结账页面
                     sb.open("https://panel.freecloud.ltd/cart.php?a=view")
-                    sb.wait_for_element(CONFIG['checkout_btn'], timeout=10)
-                    take_screenshot(sb, "12_进入购物车结算页面", username)
+                    time.sleep(3)
                     
-                    # 强制勾选隐藏的美化复选框
-                    sb.execute_script('document.querySelector("input[data-tos-checkbox]").click();')
-                    time.sleep(1)
-                    take_screenshot(sb, "13_已勾选服务条款", username)
-                    
-                    # 等待结账按钮变为可点击状态并点击
-                    sb.wait_for_element_not_disabled(CONFIG['checkout_btn'], timeout=5)
-                    sb.click(CONFIG['checkout_btn'])
-                    
-                    time.sleep(5)
-                    take_screenshot(sb, "14_点击结账后的最终页面", username)
-                    print(">>> 🎉 续费及结账流程全部完成！")
+                    # 🌟 核心改进逻辑：检查购物车内是否有结账按钮
+                    # 如果未到续费日期，购物车会为空，此时抓不到 checkout_btn
+                    if sb.is_element_visible(CONFIG['checkout_btn']):
+                        take_screenshot(sb, "12_进入购物车结算页面_准备结账", username)
+                        
+                        # 强制勾选隐藏的美化复选框
+                        sb.execute_script('document.querySelector("input[data-tos-checkbox]").click();')
+                        time.sleep(1)
+                        take_screenshot(sb, "13_已勾选服务条款", username)
+                        
+                        # 🌟 修复点：使用官方推荐的 wait_for_element_clickable 等待按钮可被点击
+                        sb.wait_for_element_clickable(CONFIG['checkout_btn'], timeout=5)
+                        sb.click(CONFIG['checkout_btn'])
+                        
+                        time.sleep(5)
+                        take_screenshot(sb, "14_点击结账后的最终页面", username)
+                        print(">>> 🎉 续费及结账流程全部完成！")
+                    else:
+                        # 拦截异常，如果商品未加入购物车，友好退出
+                        print(">>> ⏸️ 购物车为空。当前产品可能未到允许续费的时间周期，已自动跳过结账。")
+                        take_screenshot(sb, "12_购物车为空_未到续费期", username)
+                        
                 else:
                     print(">>> ⚠️ 当前账号积分达标，但没有需要续费的可用产品。")
             else:
